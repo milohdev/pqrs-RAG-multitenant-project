@@ -1,0 +1,42 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: pqrs-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-appuser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      POSTGRES_DB: ${DB_NAME:-pqrsdb}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-appuser} -d ${DB_NAME:-pqrsdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: src/App.Api/Dockerfile
+    container_name: pqrs-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=${DB_NAME:-pqrsdb};Username=${DB_USER:-appuser};Password=${DB_PASSWORD:-changeme}"
+      Jwt__Secret: ${JWT_SECRET}
+      Nvidia__BaseUrl: "https://integrate.api.nvidia.com/v1"
+      Nvidia__ApiKey: ${NVIDIA_API_KEY}
+      Nvidia__ChatModel: "nvidia/nemotron-3-nano-30b-a3b"
+      Nvidia__EmbeddingModel: "nvidia/llama-nemotron-embed-vl-1b-v2"
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:
