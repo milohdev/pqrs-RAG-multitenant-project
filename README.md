@@ -10,16 +10,20 @@ para tickets críticos, y un **widget en JS vanilla** embebible. Todo levanta co
 ## Estructura
 
 ```
-backend/
-├── App.sln                     # Solución (App.Domain, App.Application, App.Infrastructure, App.Api)
-├── Directory.Packages.props    # Versiones de paquetes centralizadas (CPM)
-└── src/
-    ├── App.Domain/             # Entidades y contratos de dominio (sin dependencias)
-    ├── App.Application/        # Casos de uso y abstracciones (referencia solo Domain)
-    ├── App.Infrastructure/     # EF Core, tenancy, IA (NVIDIA), CORS, SignalR, auth
-    └── App.Api/                # Controllers, Program.cs, wwwroot/pqrs-widget.js, Dockerfile
-├── docker-compose.yml          # 2 servicios: db (Postgres+pgvector) y backend
-├── .env.example                # Variables de entorno de ejemplo
+├── backend/                     # API (.NET 10, Clean Architecture)
+│   ├── App.sln                  # Solución (App.Domain, App.Application, App.Infrastructure, App.Api)
+│   ├── Directory.Packages.props # Versiones de paquetes centralizadas (CPM)
+│   └── src/
+│       ├── App.Domain/          # Entidades y contratos de dominio (sin dependencias)
+│       ├── App.Application/     # Casos de uso y abstracciones (referencia solo Domain)
+│       ├── App.Infrastructure/  # EF Core, tenancy, IA (NVIDIA), CORS, SignalR, auth
+│       └── App.Api/             # Controllers, Program.cs, wwwroot/pqrs-widget.js, Dockerfile
+├── frontend/                    # Panel de agentes (React + Vite)
+│   ├── src/                     # App.jsx, api.js, pages/ (Login, Tickets, KbArticles)
+│   ├── Dockerfile               # Build de producción + nginx
+│   └── nginx.conf               # Sirve estáticos y proxya /api y /hubs al backend
+├── docker-compose.yml           # 3 servicios: db, backend, frontend
+├── .env.example                 # Variables de entorno de ejemplo
 └── README.md
 ```
 
@@ -48,6 +52,11 @@ DB_NAME=pqrsdb
 JWT_SECRET=<secreto largo de al menos 32 caracteres>
 NVIDIA_API_KEY=<tu api key de nvidia>
 ```
+
+> **Para la entrega:** el `.env` debe incluirse junto al proyecto — es de donde
+> Docker Compose toma la key de NVIDIA, la contraseña de la DB y el secreto JWT.
+> Sin `NVIDIA_API_KEY` configurada (o con el placeholder), el backend registra
+> stubs de IA deterministas (ver "Módulo de IA").
 
 > En desarrollo local (sin Docker), la connection string y la API key se leen de
 > `backend/src/App.Api/appsettings.json`.
@@ -127,6 +136,21 @@ El widget (JS vanilla, sin dependencias) inyecta un botón flotante en un **Shad
 El origen de la página que embeble el widget debe estar en `Tenants.AllowedDomains`
 (CSV) del tenant correspondiente — el CORS se evalúa dinámicamente por request.
 
+**Página de prueba rápida** (guardala en cualquier carpeta y servila con `python3 -m http.server 8081`):
+
+```html
+<!DOCTYPE html>
+<html lang="es"><body>
+  <h1>Sitio que embeber el widget</h1>
+  <script src="http://localhost:8080/pqrs-widget.js"
+          data-tenant="acme-widget-key"
+          data-api-base="http://localhost:8080"></script>
+</body></html>
+```
+
+> No la abras como `file://` (doble clic): el navegador manda `Origin: null` y el
+> CORS dinámico del backend no puede resolver ese origen. Servila siempre por HTTP.
+
 ---
 
 ## Panel de agentes (frontend React)
@@ -173,14 +197,15 @@ clasificado `Alta`/`Negativo`, aparece una alerta en cualquier pantalla.
 - **Embeddings**: `nvidia/llama-nemotron-embed-vl-1b-v2` (2048 dims, truncadas a 2000 por el
   límite de índice de pgvector).
 - **Chat/triaje**: `nvidia/nemotron-3-nano-30b-a3b`.
-- El RAG busca por **similitud coseno** (umbral calibrado en `RagSearchService`) y el LLM
-  responde únicamente en base al contexto recuperado.
+- El RAG busca por **similitud coseno** con umbral **0.45** (calibrado con datos reales en
+  `RagSearchService`) y el LLM responde únicamente en base al contexto recuperado.
 - El triaje pide al LLM un JSON estricto; si no llega JSON válido, el ticket se guarda con
   valores por defecto (el agente lo reclasifica) — nunca se pierde el ticket.
 
-> **Stubs de IA**: si no hay `NVIDIA_API_KEY` válida, se registran implementaciones stub
-> deterministas para que el flujo y el aislamiento multi-tenant se puedan probar sin el
-> servicio externo (en `App.Infrastructure/Ai/StubAiServices.cs`).
+> **Stubs de IA**: si `NVIDIA_API_KEY` no está configurada (vacía o con el placeholder),
+> se registran implementaciones stub deterministas (`App.Infrastructure/Ai/StubAiServices.cs`)
+> para que el flujo y el aislamiento multi-tenant se puedan probar sin el servicio externo.
+> Con una key configurada se usan los servicios NVIDIA reales.
 
 ---
 
@@ -223,6 +248,10 @@ dotnet restore
 # la DB debe estar corriendo (ej: docker compose up -d db)
 dotnet run --project src/App.Api --urls http://localhost:8080
 ```
+
+> Si el contenedor `backend` del compose está corriendo, el puerto 8080 estará
+> ocupado: `docker compose stop backend` antes de levantar la API local (y
+> `docker compose start backend` para volver).
 
 Las migraciones se aplican solas al arrancar (`MigrateAsync`). Para regenerarlas:
 `dotnet ef migrations add <Nombre> -p src/App.Infrastructure -s src/App.Api`.
