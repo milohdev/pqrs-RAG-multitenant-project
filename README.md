@@ -61,7 +61,13 @@ docker compose up -d
 El primer arranque aplica las migraciones y siembra datos de demostración
 (idempotente): dos tenants, un agente por tenant y artículos de base de conocimiento.
 
-La API queda en **http://localhost:8080** (Swagger en `/swagger` solo en Development).
+Servicios y puertos:
+
+| Servicio | URL | Qué es |
+|---|---|---|
+| **Panel de agentes** | `http://localhost:8081` | Frontend React (nginx) — login, tickets, KB |
+| **Backend / API** | `http://localhost:8080` | API REST (Swagger en `/swagger` solo en Development) |
+| **Widget** | `http://localhost:8080/pqrs-widget.js` | Script embebible para el cliente final |
 
 ### 3. Datos de demostración sembrados automáticamente
 
@@ -120,6 +126,45 @@ El widget (JS vanilla, sin dependencias) inyecta un botón flotante en un **Shad
 
 El origen de la página que embeble el widget debe estar en `Tenants.AllowedDomains`
 (CSV) del tenant correspondiente — el CORS se evalúa dinámicamente por request.
+
+---
+
+## Panel de agentes (frontend React)
+
+Frontend opcional (fuera del alcance original del enunciado, agregado como
+herramienta de demo) para que los agentes gestionen tickets y la base de
+conocimiento de su empresa. **Un solo frontend** — el tenant se resuelve por el
+JWT del login, así que cada agente ve solo lo de su empresa.
+
+```
+frontend/
+├── vite.config.js      # proxy de /api y /hubs (incl. WebSocket) al backend :8080
+└── src/
+    ├── App.jsx         # ruteo por hash, conexión SignalR global, alertas críticas
+    ├── api.js          # cliente fetch con JWT
+    └── pages/
+        ├── Login.jsx       # login de agente
+        ├── Tickets.jsx     # bandeja + filtros + cambio de estado
+        └── KbArticles.jsx  # CRUD de base de conocimiento
+```
+
+### Correrlo
+
+Está incluido en el `docker compose up` (servicio `frontend`, nginx) en
+**http://localhost:8081**. nginx sirve el build y proxya `/api` y `/hubs`
+(SignalR/WebSocket) al backend, así que el panel y la API son same-origin.
+
+Para desarrollo con hot-reload (alternativa):
+
+```bash
+cd frontend
+npm install
+npm run dev
+# → http://localhost:5173   (Vite proxya al backend en localhost:8080)
+```
+
+El panel muestra los **tickets críticos en vivo** (SignalR): al radicarse un PQRS
+clasificado `Alta`/`Negativo`, aparece una alerta en cualquier pantalla.
 
 ---
 
